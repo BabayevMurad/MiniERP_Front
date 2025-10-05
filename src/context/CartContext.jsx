@@ -1,67 +1,107 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { AuthContext } from "./AuthContext";
+import { createContext, useEffect, useMemo, useState } from "react";
 
-export const CartContext = createContext();
+export const CartContext = createContext(null);
 
-export function CartProvider({ children }) {
-  const { user } = useContext(AuthContext);
-  const storageKey = useMemo(() => `cart:${user?.username ?? "guest"}`, [user?.username]);
+function toStrId(v) {
+  return v == null ? "" : String(v);
+}
+
+export default function CartProvider({ children }) {
   const [items, setItems] = useState(() => {
     try {
-      const raw = localStorage.getItem(storageKey);
-      return raw ? JSON.parse(raw) : [];
+      const raw = localStorage.getItem("cart");
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed)
+        ? parsed.map((it) => ({ ...it, id: toStrId(it.id ?? it.product_id) }))
+        : [];
     } catch {
       return [];
     }
   });
 
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(items));
-  }, [items, storageKey]);
+    try {
+      localStorage.setItem("cart", JSON.stringify(items));
+    } catch {}
+  }, [items]);
 
-  const addToCart = (product, qty, stock) => {
-    setItems(prev => {
-      const existing = prev.find(i => i.product_id === product.id);
-      const currentQty = existing ? existing.quantity : 0;
-      const nextQty = Math.min(currentQty + qty, stock);
-      if (existing) {
-        return prev.map(i =>
-          i.product_id === product.id ? { ...i, quantity: nextQty } : i
-        );
+  const addToCart = ({ product_id, name, price, stock = 9999 }) => {
+    const sid = toStrId(product_id);
+    setItems((prev) => {
+      const idx = prev.findIndex((it) => it.id === sid);
+      if (idx === -1) {
+        if ((Number(stock) || 0) <= 0) return prev;
+        return [
+          ...prev,
+          {
+            id: sid,
+            product_id,
+            name,
+            price: Number(price) || 0,
+            quantity: 1,
+            stock: Number(stock) || 0,
+          },
+        ];
+      } else {
+        const next = [...prev];
+        const cur = next[idx];
+        const q = Math.min(cur.quantity + 1, cur.stock);
+        if (q === cur.quantity) return prev;
+        next[idx] = { ...cur, quantity: q };
+        return next;
       }
-      return [
-        ...prev,
-        {
-          product_id: product.id,
-          name: product.name,
-          price: product.price,
-          quantity: Math.min(qty, stock),
-          stock,
-        },
-      ];
     });
   };
 
-  const setQty = (productId, qty) => {
-    setItems(prev =>
-      prev.map(i => {
-        if (i.product_id !== productId) return i;
-        const clamped = Math.min(Math.max(1, qty), i.stock ?? qty);
-        return { ...i, quantity: clamped };
+  const updateQty = (product_id, quantity) => {
+    const sid = toStrId(product_id);
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== sid) return it;
+        const q = Math.max(1, Math.min(Number(quantity) || 1, it.stock));
+        if (q === it.quantity) return it;
+        return { ...it, quantity: q };
       })
     );
   };
 
-  const removeFromCart = (productId) =>
-    setItems(prev => prev.filter(i => i.product_id !== productId));
+  const inc = (product_id) => {
+    const sid = toStrId(product_id);
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== sid) return it;
+        const q = Math.min(it.quantity + 1, it.stock);
+        if (q === it.quantity) return it;
+        return { ...it, quantity: q };
+      })
+    );
+  };
+
+  const dec = (product_id) => {
+    const sid = toStrId(product_id);
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== sid) return it;
+        const q = Math.max(it.quantity - 1, 1);
+        if (q === it.quantity) return it;
+        return { ...it, quantity: q };
+      })
+    );
+  };
+
+  const removeItem = (product_id) => {
+    const sid = toStrId(product_id);
+    setItems((prev) => prev.filter((it) => it.id !== sid));
+  };
 
   const clearCart = () => setItems([]);
 
-  const total = items.reduce((s, i) => s + i.price * i.quantity, 0);
-
-  return (
-    <CartContext.Provider value={{ items, addToCart, setQty, removeFromCart, clearCart, total }}>
-      {children}
-    </CartContext.Provider>
+  const total = useMemo(
+    () => items.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0),
+    [items]
   );
+
+  const value = { items, addToCart, updateQty, inc, dec, removeItem, clearCart, total };
+
+  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

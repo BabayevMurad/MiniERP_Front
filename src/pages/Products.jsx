@@ -5,7 +5,7 @@ import {
   listProducts,
   createProduct,
   updateProduct,
-  deleteProduct,
+  deleteProduct, 
   exportProducts,
   importProducts,
 } from "../api/products";
@@ -30,11 +30,13 @@ export default function Products() {
   const [importUpsert, setImportUpsert] = useState(true);
   const fileInputId = "excel-file-input";
 
+  const token = user?.token || localStorage.getItem("token") || "";
+
   const load = async () => {
     try {
       setLoading(true);
       setErr("");
-      const data = await listProducts(user.token, { sort });
+      const data = await listProducts(token, { sort });
       setProducts(Array.isArray(data) ? data : []);
     } catch (e) {
       setErr(e.message || "Products yüklənmədi");
@@ -44,6 +46,12 @@ export default function Products() {
   };
 
   useEffect(() => { load(); }, [sort]);
+
+  useEffect(() => {
+    if (!msg) return;
+    const t = setTimeout(() => setMsg(""), 2500);
+    return () => clearTimeout(t);
+  }, [msg]);
 
   const sortedInfo = useMemo(() => {
     switch (sort) {
@@ -64,7 +72,10 @@ export default function Products() {
         qty_in_stock: Number(newForm.qty_in_stock),
       };
       if (!payload.name || !payload.slug) throw new Error("Name və slug tələb olunur");
-      await createProduct(user.token, payload);
+      if (Number.isNaN(payload.price) || Number.isNaN(payload.qty_in_stock)) {
+        throw new Error("Price və stock ədəd olmalıdır");
+      }
+      await createProduct(token, payload);
       setOpenNew(false);
       setNewForm({ name: "", slug: "", price: "", qty_in_stock: "" });
       setMsg("Product yaradıldı");
@@ -92,7 +103,11 @@ export default function Products() {
         price: Number(editForm.price),
         qty_in_stock: Number(editForm.qty_in_stock),
       };
-      await updateProduct(user.token, editingId, payload);
+      if (!payload.name || !payload.slug) throw new Error("Name və slug tələb olunur");
+      if (Number.isNaN(payload.price) || Number.isNaN(payload.qty_in_stock)) {
+        throw new Error("Price və stock ədəd olmalıdır");
+      }
+      await updateProduct(token, editingId, payload);
       setEditingId(null);
       setMsg("Yeniləndi");
       await load();
@@ -104,7 +119,7 @@ export default function Products() {
   const remove = async (id) => {
     if (!confirm("Silinsin?")) return;
     try {
-      await deleteProduct(user.token, id);
+      await deleteProduct(token, id);
       setMsg("Silindi");
       await load();
     } catch (e) {
@@ -115,7 +130,7 @@ export default function Products() {
   const doExport = async () => {
     try {
       setErr(""); setMsg("");
-      await exportProducts(user.token);
+      await exportProducts(token);
       setMsg("Export hazırlandı (products_export.xlsx endirildi)");
     } catch (e) {
       setErr(e.message || "Export failed");
@@ -133,37 +148,27 @@ export default function Products() {
     if (!file) return;
     try {
       setErr(""); setMsg("");
-      const res = await importProducts(user.token, file, importUpsert);
+      const res = await importProducts(token, file, importUpsert);
       setMsg(`${res.detail}. created=${res.created}, updated=${res.updated}, skipped=${res.skipped}`);
-      if (res.errors?.length) {
-        console.warn("Import errors:", res.errors);
-      }
       await load();
     } catch (e2) {
       setErr(e2.message || "Import failed");
     }
   };
 
-  const [qtyById, setQtyById] = useState({});
-  const setQty = (id, v, max) => {
-    const n = Math.max(1, Math.min(max ?? 9999, Number(v) || 1));
-    setQtyById((s) => ({ ...s, [id]: n }));
-  };
-
-  const addToCartWithMsg = (p) => {
-    const q = qtyById[p.id] ?? 1;
-    if (typeof p.qty_in_stock === "number" && q > p.qty_in_stock) {
-      setErr(`Stok kifayət etmir: ${p.name} (in stock: ${p.qty_in_stock})`);
+  const addOneToCart = (p) => {
+    const stock = Number(p.qty_in_stock ?? 0);
+    if (stock <= 0) {
+      setErr(`Stok yoxdur: ${p.name}`);
       return;
     }
     addToCart({
       product_id: p.id,
       name: p.name,
-      price: p.price,
-      quantity: q,
-      stock: p.qty_in_stock,
+      price: Number(p.price) || 0,
+      stock,
     });
-    setMsg(`"${p.name}" cart-a əlavə olundu`);
+    setMsg(`"${p.name}" səbətə əlavə olundu (+1)`);
   };
 
   return (
@@ -242,15 +247,14 @@ export default function Products() {
               <th className="text-left p-2">Slug</th>
               <th className="text-left p-2">Price</th>
               <th className="text-left p-2">Stock</th>
-              <th className="text-left p-2">Actions</th>
+              {!isAdmin && <th className="text-left p-2">Cart</th>}
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td className="p-4" colSpan={5}>Loading...</td></tr>}
-            {!loading && products.length === 0 && <tr><td className="p-4" colSpan={5}>Boşdur</td></tr>}
+            {loading && <tr><td className="p-4" colSpan={isAdmin ? 4 : 5}>Loading...</td></tr>}
+            {!loading && products.length === 0 && <tr><td className="p-4" colSpan={isAdmin ? 4 : 5}>Boşdur</td></tr>}
             {!loading && products.map(p => {
-              const q = qtyById[p.id] ?? 1;
-              const max = typeof p.qty_in_stock === "number" ? p.qty_in_stock : 9999;
+              const stock = Number(p.qty_in_stock ?? 0);
               const editing = editingId === p.id;
 
               return (
@@ -273,91 +277,21 @@ export default function Products() {
                       />
                     ) : p.slug}
                   </td>
-                  <td className="p-2">
-                    {editing ? (
-                      <input
-                        type="number"
-                        className="border rounded px-2 py-1 w-28"
-                        value={editForm.price}
-                        onChange={e => setEditForm(f => ({ ...f, price: e.target.value }))}
-                      />
-                    ) : p.price}
-                  </td>
-                  <td className="p-2">
-                    {editing ? (
-                      <input
-                        type="number"
-                        className="border rounded px-2 py-1 w-24"
-                        value={editForm.qty_in_stock}
-                        onChange={e => setEditForm(f => ({ ...f, qty_in_stock: e.target.value }))}
-                      />
-                    ) : p.qty_in_stock}
-                  </td>
-                  <td className="p-2">
-                    {isAdmin ? (
-                      <div className="flex items-center gap-2">
-                        {!editing ? (
-                          <>
-                            <button
-                              onClick={() => startEdit(p)}
-                              className="px-3 py-1 rounded bg-gray-800 text-white"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => remove(p.id)}
-                              className="px-3 py-1 rounded bg-red-600 text-white"
-                            >
-                              Delete
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              onClick={saveEdit}
-                              className="px-3 py-1 rounded bg-blue-600 text-white"
-                            >
-                              Save
-                            </button>
-                            <button
-                              onClick={() => setEditingId(null)}
-                              className="px-3 py-1 rounded bg-gray-200"
-                            >
-                              Cancel
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <div className="inline-flex items-center border rounded">
-                          <button className="px-2" onClick={() => setQty(p.id, Math.max(1, q - 1), max)}>-</button>
-                          <input
-                            type="number"
-                            min={1}
-                            max={max}
-                            className="w-16 text-center outline-none"
-                            value={q}
-                            onChange={e => setQty(p.id, e.target.value, max)}
-                          />
-                          <button
-                            className="px-2"
-                            onClick={() => setQty(p.id, Math.min(max, q + 1), max)}
-                            disabled={q >= max}
-                            title={q >= max ? "Max stock" : "Increase"}
-                          >+</button>
-                        </div>
-                        <button
-                          onClick={() => addToCartWithMsg(p)}
-                          className="px-3 py-1 rounded bg-green-600 text-white disabled:opacity-60"
-                          disabled={max <= 0}
-                          title={max <= 0 ? "Out of stock" : "Add to cart"}
-                        >
-                          Add to cart
-                        </button>
-                      </div>
-                    )}
-                  </td>
+                  <td className="p-2">{p.price}</td>
+                  <td className="p-2">{stock}</td>
+
+                  {!isAdmin && (
+                    <td className="p-2">
+                      <button
+                        onClick={() => addOneToCart(p)}
+                        className="px-3 py-1 rounded bg-green-600 text-white disabled:opacity-60"
+                        disabled={stock <= 0}
+                        title={stock <= 0 ? "Out of stock" : "Add +1"}
+                      >
+                        Add to cart
+                      </button>
+                    </td>
+                  )}
                 </tr>
               );
             })}

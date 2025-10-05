@@ -1,7 +1,14 @@
 import { useContext, useEffect, useMemo, useState } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { CartContext } from "../context/CartContext";
-import { createOrder, listOrders, payOrder, getOrder, adminUpdateOrderStatus } from "../api/orders";
+
+import {
+  listOrders,
+  getOrder,
+  payOrder,
+  adminUpdateOrderStatus,
+  createOrder,
+} from "../api/orders";
 
 function decodeJwtSub(token) {
   try {
@@ -32,10 +39,12 @@ const ADMIN_ALLOWED = {
 
 export default function Orders() {
   const { user } = useContext(AuthContext);
-  const { items: cartItems, setQty, removeFromCart, clearCart, total } = useContext(CartContext);
 
+  const { items, updateQty, inc, dec, removeItem, clearCart, total } = useContext(CartContext);
+
+  const token = (typeof window !== "undefined" && localStorage.getItem("token")) || user?.token || "";
   const isAdmin = user?.role === "admin";
-  const currentUserId = useMemo(() => decodeJwtSub(user?.token), [user?.token]);
+  const currentUserId = useMemo(() => decodeJwtSub(token), [token]);
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -43,7 +52,6 @@ export default function Orders() {
   const [placing, setPlacing] = useState(false);
   const [payingId, setPayingId] = useState(null);
 
-  // detail modal
   const [openDetail, setOpenDetail] = useState(false);
   const [detail, setDetail] = useState(null);
   const [savingStatus, setSavingStatus] = useState(false);
@@ -53,7 +61,7 @@ export default function Orders() {
     try {
       setLoading(true);
       setErr("");
-      const data = await listOrders(user.token);
+      const data = await listOrders(token);
       setOrders(Array.isArray(data) ? data : []);
     } catch (e) {
       setErr(e.message || "Orders yüklənə bilmədi");
@@ -62,27 +70,31 @@ export default function Orders() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const visibleOrders = useMemo(() => {
     if (isAdmin) return orders;
     if (!currentUserId) return [];
-    return orders.filter(o => o.user_id === currentUserId);
+    return orders.filter((o) => o.user_id === currentUserId);
   }, [orders, isAdmin, currentUserId]);
+
+  const cartItems = items;
 
   const placeOrder = async () => {
     if (cartItems.length === 0) {
       alert("Cart boşdur");
       return;
     }
-    const itemsPayload = cartItems.map(i => ({
+    const itemsPayload = cartItems.map((i) => ({
       product_id: i.product_id,
       quantity: i.quantity,
     }));
     try {
       setPlacing(true);
       setErr("");
-      await createOrder(user.token, itemsPayload);
+      await createOrder(token, itemsPayload);
       clearCart();
       await load();
     } catch (e) {
@@ -96,7 +108,7 @@ export default function Orders() {
     try {
       setPayingId(id);
       setErr("");
-      await payOrder(user.token, id);
+      await payOrder(token, id);
       await load();
     } catch (e) {
       setErr(e.message || "Ödəniş alınmadı");
@@ -108,7 +120,7 @@ export default function Orders() {
   const openOrderDetail = async (id) => {
     try {
       setErr("");
-      const d = await getOrder(user.token, id);
+      const d = await getOrder(token, id);
       setDetail(d);
       setEditStatus(d.status);
       setOpenDetail(true);
@@ -125,7 +137,7 @@ export default function Orders() {
     }
     try {
       setSavingStatus(true);
-      await adminUpdateOrderStatus(user.token, detail.id, editStatus);
+      await adminUpdateOrderStatus(token, detail.id, editStatus);
       await load();
       setOpenDetail(false);
     } catch (e) {
@@ -142,7 +154,7 @@ export default function Orders() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Cart</h2>
             <div className="text-sm">
-              Total: <span className="font-semibold">{total.toFixed(2)}</span>
+              Total: <span className="font-semibold">{Number(total || 0).toFixed(2)}</span>
             </div>
           </div>
           <div className="mt-3">
@@ -162,22 +174,27 @@ export default function Orders() {
                   </thead>
                   <tbody>
                     {cartItems.map((ci) => (
-                      <tr key={ci.product_id} className="border-t">
+                      <tr key={String(ci.product_id)} className="border-t">
                         <td className="p-2">{ci.name}</td>
                         <td className="p-2">
                           <div className="inline-flex items-center border rounded">
-                            <button className="px-2 py-1" onClick={() => setQty(ci.product_id, Math.max(1, ci.quantity - 1))}>-</button>
+                            <button
+                              className="px-2 py-1"
+                              onClick={() => dec(ci.product_id)}
+                            >
+                              -
+                            </button>
                             <input
                               type="number"
                               className="w-16 text-center outline-none"
                               min={1}
                               max={ci.stock ?? 9999}
                               value={ci.quantity}
-                              onChange={e => setQty(ci.product_id, Number(e.target.value))}
+                              onChange={(e) => updateQty(ci.product_id, e.target.value)}
                             />
                             <button
                               className="px-2 py-1"
-                              onClick={() => setQty(ci.product_id, Math.min((ci.stock ?? 9999), ci.quantity + 1))}
+                              onClick={() => inc(ci.product_id)}
                               disabled={ci.quantity >= (ci.stock ?? 9999)}
                               title={ci.quantity >= (ci.stock ?? 9999) ? "Max stock" : "Increase"}
                             >
@@ -189,9 +206,14 @@ export default function Orders() {
                           )}
                         </td>
                         <td className="p-2">{ci.price}</td>
-                        <td className="p-2">{(ci.price * ci.quantity).toFixed(2)}</td>
                         <td className="p-2">
-                          <button className="px-3 py-1 rounded bg-red-600 text-white" onClick={() => removeFromCart(ci.product_id)}>
+                          {(Number(ci.price || 0) * Number(ci.quantity || 0)).toFixed(2)}
+                        </td>
+                        <td className="p-2">
+                          <button
+                            className="px-3 py-1 rounded bg-red-600 text-white"
+                            onClick={() => removeItem(ci.product_id)}
+                          >
                             Remove
                           </button>
                         </td>
@@ -218,9 +240,6 @@ export default function Orders() {
       <section className="bg-white rounded shadow p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Orders</h2>
-          <button onClick={load} className="text-sm px-3 py-1 rounded bg-gray-100 hover:bg-gray-200">
-            Refresh
-          </button>
         </div>
 
         {err && <div className="mt-3 text-red-600">{err}</div>}
@@ -238,34 +257,53 @@ export default function Orders() {
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td className="p-3" colSpan={6}>Loading...</td></tr>}
-              {!loading && visibleOrders.length === 0 && <tr><td className="p-3" colSpan={6}>Order tapılmadı</td></tr>}
-              {!loading && visibleOrders.map(o => (
-                <tr key={o.id} className="border-t">
-                  <td className="p-2">#{o.id}</td>
-                  {isAdmin && <td className="p-2">{o.user_id}</td>}
-                  <td className="p-2"><StatusBadge status={o.status} /></td>
-                  <td className="p-2">{o.total_amount?.toFixed ? o.total_amount.toFixed(2) : o.total_amount}</td>
-                  <td className="p-2">{o.created_at ? new Date(o.created_at).toLocaleString() : "-"}</td>
-                  <td className="p-2 flex items-center gap-2">
-                    <button
-                      onClick={() => openOrderDetail(o.id)}
-                      className="px-3 py-1 rounded bg-gray-800 text-white"
-                    >
-                      Details
-                    </button>
-                    {!isAdmin && o.status === "NEW" && (
-                      <button
-                        onClick={() => pay(o.id)}
-                        disabled={payingId === o.id}
-                        className="px-3 py-1 rounded bg-blue-600 text-white disabled:opacity-60"
-                      >
-                        {payingId === o.id ? "Paying..." : "Pay"}
-                      </button>
-                    )}
+              {loading && (
+                <tr>
+                  <td className="p-3" colSpan={6}>
+                    Loading...
                   </td>
                 </tr>
-              ))}
+              )}
+              {!loading && visibleOrders.length === 0 && (
+                <tr>
+                  <td className="p-3" colSpan={6}>
+                    Order tapılmadı
+                  </td>
+                </tr>
+              )}
+              {!loading &&
+                visibleOrders.map((o) => (
+                  <tr key={o.id} className="border-t">
+                    <td className="p-2">#{o.id}</td>
+                    {isAdmin && <td className="p-2">{o.user_id}</td>}
+                    <td className="p-2">
+                      <StatusBadge status={o.status} />
+                    </td>
+                    <td className="p-2">
+                      {o.total_amount?.toFixed ? o.total_amount.toFixed(2) : o.total_amount}
+                    </td>
+                    <td className="p-2">
+                      {o.created_at ? new Date(o.created_at).toLocaleString() : "-"}
+                    </td>
+                    <td className="p-2 flex items-center gap-2">
+                      <button
+                        onClick={() => openOrderDetail(o.id)}
+                        className="px-3 py-1 rounded bg-gray-800 text-white"
+                      >
+                        Details
+                      </button>
+                      {!isAdmin && o.status === "NEW" && (
+                        <button
+                          onClick={() => pay(o.id)}
+                          disabled={payingId === o.id}
+                          className="px-3 py-1 rounded bg-blue-600 text-white disabled:opacity-60"
+                        >
+                          {payingId === o.id ? "Paying..." : "Pay"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>
@@ -276,13 +314,26 @@ export default function Orders() {
           <div className="bg-white rounded shadow-lg w-full max-w-2xl">
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="text-lg font-semibold">Order #{detail.id}</h3>
-              <button onClick={()=>setOpenDetail(false)} className="text-gray-500 hover:text-black">✕</button>
+              <button onClick={() => setOpenDetail(false)} className="text-gray-500 hover:text-black">
+                ✕
+              </button>
             </div>
             <div className="p-4 space-y-4">
               <div className="flex items-center gap-4 text-sm">
-                <div>User ID: <b>{detail.user_id}</b></div>
-                <div>Status: <StatusBadge status={detail.status} /></div>
-                <div>Total: <b>{detail.total_amount?.toFixed ? detail.total_amount.toFixed(2) : detail.total_amount}</b></div>
+                <div>
+                  User ID: <b>{detail.user_id}</b>
+                </div>
+                <div>
+                  Status: <StatusBadge status={detail.status} />
+                </div>
+                <div>
+                  Total:{" "}
+                  <b>
+                    {detail.total_amount?.toFixed
+                      ? detail.total_amount.toFixed(2)
+                      : detail.total_amount}
+                  </b>
+                </div>
                 <div>Created: {detail.created_at ? new Date(detail.created_at).toLocaleString() : "-"}</div>
               </div>
 
@@ -297,12 +348,14 @@ export default function Orders() {
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.items?.map(it => (
+                    {detail.items?.map((it) => (
                       <tr key={it.id} className="border-t">
                         <td className="p-2">{it.product_name_snapshot}</td>
                         <td className="p-2">{it.product_price_snapshot}</td>
                         <td className="p-2">{it.quantity}</td>
-                        <td className="p-2">{it.line_total?.toFixed ? it.line_total.toFixed(2) : it.line_total}</td>
+                        <td className="p-2">
+                          {it.line_total?.toFixed ? it.line_total.toFixed(2) : it.line_total}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -316,10 +369,12 @@ export default function Orders() {
                     <select
                       className="border rounded px-3 py-2"
                       value={editStatus}
-                      onChange={e=>setEditStatus(e.target.value)}
+                      onChange={(e) => setEditStatus(e.target.value)}
                     >
-                      {ADMIN_ALLOWED[detail.status]?.map(s => (
-                        <option key={s} value={s}>{s}</option>
+                      {ADMIN_ALLOWED[detail.status]?.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
                       ))}
                     </select>
                     <button

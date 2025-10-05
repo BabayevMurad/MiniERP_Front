@@ -1,15 +1,32 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider } from "./context/AuthContext";
-import { CartProvider } from "./context/CartContext";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 
+import { AuthProvider } from "./context/AuthContext";
+import CartProvider from "./context/CartContext";
+
+import Sidebar from "./components/Sidebar";
+import Header from "./components/Header";
 import ProtectedRoute from "./components/ProtectedRoute";
-import AppLayout from "./layouts/AppLayout";
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Products from "./pages/Products";
 import Orders from "./pages/Orders";
+
+
+function ProtectedLayout() {
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <Header />
+      <div className="flex">
+        <Sidebar />
+        <main className="flex-1 p-4">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   return (
@@ -21,8 +38,8 @@ export default function App() {
             <Route path="/register" element={<Register />} />
 
             <Route element={<ProtectedRoute />}>
-              <Route element={<AppLayout />}>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route element={<ProtectedLayout />}>
+                <Route index element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/products" element={<Products />} />
                 <Route path="/orders" element={<Orders />} />
