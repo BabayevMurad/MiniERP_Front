@@ -5,7 +5,7 @@ import {
   listProducts,
   createProduct,
   updateProduct,
-  deleteProduct, 
+  deleteProduct,
   exportProducts,
   importProducts,
 } from "../api/products";
@@ -14,6 +14,8 @@ export default function Products() {
   const { user } = useContext(AuthContext);
   const isAdmin = user?.role === "admin";
   const { addToCart } = useContext(CartContext);
+
+  const token = user?.token || (typeof window !== "undefined" ? localStorage.getItem("token") : "");
 
   const [products, setProducts] = useState([]);
   const [sort, setSort] = useState("price_asc");
@@ -30,9 +32,8 @@ export default function Products() {
   const [importUpsert, setImportUpsert] = useState(true);
   const fileInputId = "excel-file-input";
 
-  const token = user?.token || localStorage.getItem("token") || "";
-
   const load = async () => {
+    if (!token) return;
     try {
       setLoading(true);
       setErr("");
@@ -45,7 +46,7 @@ export default function Products() {
     }
   };
 
-  useEffect(() => { load(); }, [sort]);
+  useEffect(() => { load();}, [sort]);
 
   useEffect(() => {
     if (!msg) return;
@@ -171,6 +172,10 @@ export default function Products() {
     setMsg(`"${p.name}" səbətə əlavə olundu (+1)`);
   };
 
+  if (!token) {
+    return <div className="p-6">Zəhmət olmasa, <b>login</b> olun.</div>;
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -247,12 +252,14 @@ export default function Products() {
               <th className="text-left p-2">Slug</th>
               <th className="text-left p-2">Price</th>
               <th className="text-left p-2">Stock</th>
-              {!isAdmin && <th className="text-left p-2">Cart</th>}
+              <th className="text-left p-2">
+                {isAdmin ? "Actions" : "Cart"}
+              </th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td className="p-4" colSpan={isAdmin ? 4 : 5}>Loading...</td></tr>}
-            {!loading && products.length === 0 && <tr><td className="p-4" colSpan={isAdmin ? 4 : 5}>Boşdur</td></tr>}
+            {loading && <tr><td className="p-4" colSpan={5}>Loading...</td></tr>}
+            {!loading && products.length === 0 && <tr><td className="p-4" colSpan={5}>Boşdur</td></tr>}
             {!loading && products.map(p => {
               const stock = Number(p.qty_in_stock ?? 0);
               const editing = editingId === p.id;
@@ -277,11 +284,63 @@ export default function Products() {
                       />
                     ) : p.slug}
                   </td>
-                  <td className="p-2">{p.price}</td>
-                  <td className="p-2">{stock}</td>
+                  <td className="p-2">
+                    {editing ? (
+                      <input
+                        type="number"
+                        className="border rounded px-2 py-1 w-full"
+                        value={editForm.price}
+                        onChange={e => setEditForm(f => ({ ...f, price: e.target.value }))}
+                      />
+                    ) : p.price}
+                  </td>
+                  <td className="p-2">
+                    {editing ? (
+                      <input
+                        type="number"
+                        className="border rounded px-2 py-1 w-full"
+                        value={editForm.qty_in_stock}
+                        onChange={e => setEditForm(f => ({ ...f, qty_in_stock: e.target.value }))}
+                      />
+                    ) : stock}
+                  </td>
 
-                  {!isAdmin && (
-                    <td className="p-2">
+                  <td className="p-2">
+                    {isAdmin ? (
+                      <div className="flex items-center gap-2">
+                        {!editing ? (
+                          <>
+                            <button
+                              onClick={() => startEdit(p)}
+                              className="px-3 py-1 rounded bg-gray-800 text-white"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => remove(p.id)}
+                              className="px-3 py-1 rounded bg-red-600 text-white"
+                            >
+                              Delete
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={saveEdit}
+                              className="px-3 py-1 rounded bg-blue-600 text-white"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditingId(null)}
+                              className="px-3 py-1 rounded bg-gray-200"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ) : (
                       <button
                         onClick={() => addOneToCart(p)}
                         className="px-3 py-1 rounded bg-green-600 text-white disabled:opacity-60"
@@ -290,8 +349,8 @@ export default function Products() {
                       >
                         Add to cart
                       </button>
-                    </td>
-                  )}
+                    )}
+                  </td>
                 </tr>
               );
             })}
